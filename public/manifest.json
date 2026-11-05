@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "AetherForge Studio",
+  "short_name": "AetherForge",
+  "description": "All-in-one standalone game engine, 3D studio, VS Code editor, Termux terminal, No-Code builder, and cross-platform export suite.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#121316",
+  "background_color": "#121316",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

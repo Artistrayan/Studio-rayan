@@ -1,0 +1,6 @@
+{
+  "name": "AetherForge Studio - Game & App Engine",
+  "description": "An all-in-one standalone game engine, 3D studio, VS Code editor, Termux terminal, No-Code builder, and cross-platform export suite.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
