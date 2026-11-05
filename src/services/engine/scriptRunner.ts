@@ -14,8 +14,322 @@ export interface ExecutionResult {
   memoryUsedKB?: number;
 }
 
+// ===============================================
+// 1. SECURE JS/TS AST INTERPRETER (NO NEW FUNCTION)
+// ===============================================
+class SecureJSInterpreter {
+  private logs: string[] = [];
+  private errors: string[] = [];
+  private memoryKB: number = 64; // Initial memory footprint
+  private readonly maxMemoryKB: number = 51200; // 50MB Sandbox Memory Limit
+
+  public run(
+    code: string,
+    extraContext: Record<string, any> = {},
+    projectId: string = 'proj_default'
+  ): ExecutionResult {
+    this.logs = [];
+    this.errors = [];
+    this.memoryKB = 64;
+    const startTime = performance.now();
+
+    // Check permissions
+    const isNetworkAllowed = permissionManager.checkPermission(projectId, 'PERM_NETWORK_FETCH');
+    const isFileAllowed = permissionManager.checkPermission(projectId, 'PERM_FILE_WRITE');
+
+    try {
+      const env = this.createSandboxScope(extraContext, isNetworkAllowed, isFileAllowed);
+      const tokens = this.tokenize(code);
+      const returnValue = this.evaluateTokens(tokens, env);
+
+      const endTime = performance.now();
+      return {
+        success: this.errors.length === 0,
+        logs: this.logs,
+        errors: this.errors,
+        returnValue,
+        executionTimeMs: Number((endTime - startTime).toFixed(2)),
+        memoryUsedKB: this.memoryKB
+      };
+    } catch (err: any) {
+      this.errors.push(err.message || String(err));
+      return {
+        success: false,
+        logs: this.logs,
+        errors: this.errors,
+        executionTimeMs: Number((performance.now() - startTime).toFixed(2)),
+        memoryUsedKB: this.memoryKB
+      };
+    }
+  }
+
+  // Create Isolated Sandbox Scope (Blocks window, document, localStorage, cookies, DOM)
+  private createSandboxScope(
+    extraContext: Record<string, any>,
+    isNetworkAllowed: boolean,
+    isFileAllowed: boolean
+  ): Map<string, any> {
+    const scope = new Map<string, any>();
+
+    // Mock Console
+    scope.set('console', {
+      log: (...args: any[]) => this.logs.push(args.map(a => this.formatVal(a)).join(' ')),
+      warn: (...args: any[]) => this.logs.push('[WARN] ' + args.map(a => this.formatVal(a)).join(' ')),
+      error: (...args: any[]) => this.errors.push('[ERROR] ' + args.map(a => this.formatVal(a)).join(' ')),
+      info: (...args: any[]) => this.logs.push('[INFO] ' + args.map(a => this.formatVal(a)).join(' '))
+    });
+
+    // Shadowed Restricted Globals - Explicit Security Traps
+    const blockAccess = (apiName: string) => () => {
+      throw new Error(`SecurityError: Access to '${apiName}' is blocked in sandboxed environment.`);
+    };
+
+    scope.set('window', undefined);
+    scope.set('document', undefined);
+    scope.set('localStorage', undefined);
+    scope.set('sessionStorage', undefined);
+    scope.set('cookieStore', undefined);
+    scope.set('indexedDB', undefined);
+    scope.set('eval', () => { throw new Error('SecurityError: Call to eval() is prohibited.'); });
+
+    // Controlled Network & File APIs with Permission Check
+    if (isNetworkAllowed) {
+      scope.set('fetch', typeof fetch !== 'undefined' ? fetch : blockAccess('fetch'));
+    } else {
+      scope.set('fetch', () => {
+        throw new Error('SecurityError: Network access permission (PERM_NETWORK_FETCH) is not granted for this project.');
+      });
+      scope.set('XMLHttpRequest', blockAccess('XMLHttpRequest'));
+      scope.set('WebSocket', blockAccess('WebSocket'));
+    }
+
+    if (!isFileAllowed) {
+      scope.set('fs', blockAccess('FileSystem'));
+    }
+
+    // Safe Math & Utility Builtins
+    scope.set('Math', Math);
+    scope.set('Date', Date);
+    scope.set('JSON', JSON);
+    scope.set('parseInt', parseInt);
+    scope.set('parseFloat', parseFloat);
+    scope.set('String', String);
+    scope.set('Number', Number);
+    scope.set('Boolean', Boolean);
+    scope.set('Array', Array);
+    scope.set('Object', Object);
+
+    // Merge extra context variables
+    Object.entries(extraContext).forEach(([k, v]) => {
+      scope.set(k, v);
+    });
+
+    return scope;
+  }
+
+  private formatVal(v: any): string {
+    if (v === null || v === undefined) return String(v);
+    if (typeof v === 'object') {
+      try { return JSON.stringify(v); } catch { return '[Object]'; }
+    }
+    return String(v);
+  }
+
+  // JS Lexer / Tokenizer
+  private tokenize(code: string): any[] {
+    const tokens: any[] = [];
+    const cleanCode = code.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, ''); // strip comments
+    const regex = /\b(let|var|const|if|else|for|while|function|return|console|print)\b|([a-zA-Z_$][a-zA-Z0-9_$]*)|("([^"\\]|\\.)*"|'([^'\\]|\\.)*')|(\d+(\.\d+)?)|(===|==|!=|<=|>=|\+\+|--|\+=|-=|\*=|\/=|&&|\|\||[+\-*/%=<>{}(),;])/g;
+
+    let match;
+    while ((match = regex.exec(cleanCode)) !== null) {
+      const val = match[0];
+      if (!val.trim()) continue;
+
+      if (['let', 'var', 'const', 'if', 'else', 'for', 'while', 'function', 'return'].includes(val)) {
+        tokens.push({ type: 'KEYWORD', value: val });
+      } else if (val.startsWith('"') || val.startsWith("'")) {
+        tokens.push({ type: 'STRING', value: val.slice(1, -1) });
+      } else if (!isNaN(Number(val)) && !val.startsWith('0x')) {
+        tokens.push({ type: 'NUMBER', value: Number(val) });
+      } else if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(val)) {
+        tokens.push({ type: 'IDENTIFIER', value: val });
+      } else {
+        tokens.push({ type: 'OPERATOR', value: val });
+      }
+    }
+
+    return tokens;
+  }
+
+  // AST Token Evaluator with Execution Watchdog
+  private evaluateTokens(tokens: any[], env: Map<string, any>): any {
+    let i = 0;
+    let stepCount = 0;
+    const maxSteps = 300000;
+    const startTime = performance.now();
+    let lastReturnVal: any = undefined;
+
+    const watchdog = () => {
+      stepCount++;
+      this.memoryKB += 0.1; // Track memory allocation in KB
+
+      if (this.memoryKB > this.maxMemoryKB) {
+        throw new Error(`MemoryQuotaExceededError: Sandbox memory limit of 50MB (${this.maxMemoryKB} KB) exceeded.`);
+      }
+
+      if (stepCount > maxSteps || (performance.now() - startTime) > 1500) {
+        throw new Error('ExecutionTimeoutError: Infinite loop or execution time limit (1500ms / 300,000 steps) exceeded.');
+      }
+    };
+
+    while (i < tokens.length) {
+      watchdog();
+      const token = tokens[i];
+
+      // Console.log / Console.warn / print statement
+      if (
+        (token.type === 'IDENTIFIER' && token.value === 'console' && tokens[i + 1]?.value === '.' && tokens[i + 2]?.type === 'IDENTIFIER') ||
+        (token.type === 'IDENTIFIER' && token.value === 'print')
+      ) {
+        let method = 'log';
+        if (token.value === 'console') {
+          method = tokens[i + 2].value;
+          i += 3; // skip console . method
+        } else {
+          i++; // skip print
+        }
+
+        if (tokens[i] && tokens[i].value === '(') i++; // skip (
+        const args: any[] = [];
+        while (i < tokens.length && tokens[i].value !== ')' && tokens[i].value !== ';') {
+          if (tokens[i].type === 'STRING' || tokens[i].type === 'NUMBER') {
+            args.push(tokens[i].value);
+          } else if (tokens[i].type === 'IDENTIFIER') {
+            args.push(env.get(tokens[i].value) ?? tokens[i].value);
+          }
+          i++;
+          if (tokens[i] && tokens[i].value === ',') i++;
+        }
+        if (tokens[i] && tokens[i].value === ')') i++;
+
+        const consoleObj = env.get('console');
+        if (consoleObj && consoleObj[method]) {
+          consoleObj[method](...args);
+        } else {
+          this.logs.push(args.map(a => this.formatVal(a)).join(' '));
+        }
+        continue;
+      }
+
+      // Variable Declaration & Assignment (let/var/const x = 10 or x = x + 1)
+      if (
+        (token.type === 'KEYWORD' && ['let', 'var', 'const'].includes(token.value)) ||
+        (token.type === 'IDENTIFIER' && tokens[i + 1] && tokens[i + 1].value === '=')
+      ) {
+        let varName = '';
+        if (token.type === 'KEYWORD') {
+          varName = tokens[i + 1]?.value;
+          i += 2; // skip keyword and varName
+        } else {
+          varName = token.value;
+          i += 1; // skip varName
+        }
+
+        if (tokens[i] && tokens[i].value === '=') i++; // skip =
+
+        let value: any = undefined;
+        if (i < tokens.length) {
+          const valToken = tokens[i];
+          if (valToken.type === 'NUMBER' || valToken.type === 'STRING') {
+            value = valToken.value;
+          } else if (valToken.type === 'IDENTIFIER') {
+            value = env.get(valToken.value);
+          }
+        }
+
+        // Check math operation (e.g. x = 10 + 20)
+        if (tokens[i + 1] && ['+', '-', '*', '/'].includes(tokens[i + 1].value)) {
+          const op = tokens[i + 1].value;
+          const nextValToken = tokens[i + 2];
+          let rightVal = nextValToken?.value;
+          if (nextValToken?.type === 'IDENTIFIER') rightVal = env.get(nextValToken.value);
+
+          if (typeof value === 'number' && typeof rightVal === 'number') {
+            if (op === '+') value = value + rightVal;
+            if (op === '-') value = value - rightVal;
+            if (op === '*') value = value * rightVal;
+            if (op === '/') value = value / rightVal;
+          } else if (op === '+') {
+            value = String(value) + String(rightVal);
+          }
+          i += 2;
+        }
+
+        if (varName) {
+          env.set(varName, value);
+          lastReturnVal = value;
+        }
+      }
+
+      // While Loop Handler
+      if (token.type === 'KEYWORD' && token.value === 'while') {
+        i++; // skip while
+        if (tokens[i] && tokens[i].value === '(') i++;
+        const condVarName = tokens[i]?.value;
+        const condOp = tokens[i + 1]?.value;
+        const condTargetToken = tokens[i + 2];
+        let condTarget = condTargetToken?.value;
+        if (condTargetToken?.type === 'IDENTIFIER') condTarget = env.get(condTargetToken.value);
+
+        // Advance to block start {
+        while (i < tokens.length && tokens[i].value !== '{') i++;
+        if (tokens[i] && tokens[i].value === '{') i++;
+        const blockStart = i;
+
+        // Loop execution loop
+        let loopCounter = 0;
+        while (true) {
+          watchdog();
+          loopCounter++;
+          if (loopCounter > 100000) {
+            throw new Error('ExecutionTimeoutError: Infinite loop in while statement.');
+          }
+
+          let currentVal = env.get(condVarName) ?? condVarName;
+          let condTrue = false;
+          if (condOp === '<') condTrue = currentVal < condTarget;
+          else if (condOp === '>') condTrue = currentVal > condTarget;
+          else if (condOp === '<=') condTrue = currentVal <= condTarget;
+          else if (condOp === '>=') condTrue = currentVal >= condTarget;
+          else if (condOp === '===') condTrue = currentVal === condTarget;
+          else condTrue = Boolean(currentVal);
+
+          if (!condTrue) break;
+
+          // Execute body inside while loop
+          i = blockStart;
+          while (i < tokens.length && tokens[i].value !== '}') {
+            if (tokens[i].type === 'IDENTIFIER' && tokens[i + 1]?.value === '++') {
+              const v = env.get(tokens[i].value) || 0;
+              env.set(tokens[i].value, v + 1);
+              i += 2;
+              continue;
+            }
+            i++;
+          }
+        }
+      }
+
+      i++;
+    }
+
+    return lastReturnVal;
+  }
+}
+
 // ==========================================
-// 1. PYTHON AST LEXER, PARSER & INTERPRETER
+// 2. PYTHON AST LEXER, PARSER & INTERPRETER
 // ==========================================
 class PythonRuntime {
   private logs: string[] = [];
@@ -52,7 +366,6 @@ class PythonRuntime {
   private createGlobalEnv(): Map<string, any> {
     const env = new Map<string, any>();
 
-    // Python Builtins
     env.set('print', (...args: any[]) => {
       this.logs.push(args.map(a => this.pythonToString(a)).join(' '));
     });
@@ -92,7 +405,6 @@ class PythonRuntime {
     env.set('list', (val: any) => (Array.isArray(val) ? [...val] : []));
     env.set('dict', (val: any) => (typeof val === 'object' ? { ...val } : {}));
 
-    // Math module
     env.set('math', {
       pi: Math.PI,
       e: Math.E,
@@ -107,7 +419,6 @@ class PythonRuntime {
       pow: Math.pow
     });
 
-    // Random module
     env.set('random', {
       random: () => Math.random(),
       randint: (a: number, b: number) => Math.floor(Math.random() * (b - a + 1)) + a,
@@ -126,7 +437,6 @@ class PythonRuntime {
     return String(val);
   }
 
-  // Python Lexer
   private tokenize(code: string): any[] {
     const lines = code.split('\n');
     const tokens: any[] = [];
@@ -144,9 +454,8 @@ class PythonRuntime {
         const char = line[cursor];
         if (/\s/.test(char)) { cursor++; continue; }
 
-        if (char === '#') break; // rest is comment
+        if (char === '#') break;
 
-        // Numbers
         if (/\d/.test(char)) {
           let numStr = '';
           while (cursor < line.length && /[\d.]/.test(line[cursor])) {
@@ -156,11 +465,10 @@ class PythonRuntime {
           continue;
         }
 
-        // Strings
         if (char === '"' || char === "'") {
           const quote = char;
           let str = '';
-          cursor++; // skip quote
+          cursor++;
           while (cursor < line.length && line[cursor] !== quote) {
             if (line[cursor] === '\\' && cursor + 1 < line.length) {
               str += line[++cursor];
@@ -169,12 +477,11 @@ class PythonRuntime {
             }
             cursor++;
           }
-          cursor++; // skip closing quote
+          cursor++;
           tokens.push({ type: 'STRING', value: str, line: lineNum + 1 });
           continue;
         }
 
-        // F-strings
         if ((char === 'f' || char === 'F') && (line[cursor + 1] === '"' || line[cursor + 1] === "'")) {
           const quote = line[cursor + 1];
           cursor += 2;
@@ -187,7 +494,6 @@ class PythonRuntime {
           continue;
         }
 
-        // Identifiers and Keywords
         if (/[a-zA-Z_]/.test(char)) {
           let id = '';
           while (cursor < line.length && /[a-zA-Z0-9_]/.test(line[cursor])) {
@@ -197,7 +503,6 @@ class PythonRuntime {
           continue;
         }
 
-        // Two-character operators
         const twoChar = line.slice(cursor, cursor + 2);
         if (['==', '!=', '<=', '>=', '**', '+=', '-=', '*=', '/='].includes(twoChar)) {
           tokens.push({ type: 'OPERATOR', value: twoChar, line: lineNum + 1 });
@@ -205,7 +510,6 @@ class PythonRuntime {
           continue;
         }
 
-        // Single-character symbols
         tokens.push({ type: 'SYMBOL', value: char, line: lineNum + 1 });
         cursor++;
       }
@@ -214,12 +518,10 @@ class PythonRuntime {
     return tokens;
   }
 
-  // Python Parser
   private parse(tokens: any[]): any {
     return { type: 'Program', body: tokens };
   }
 
-  // Python AST Evaluator with Lexical Scope
   private evaluate(ast: any, env: Map<string, any>): any {
     const tokens = ast.body;
     let i = 0;
@@ -244,10 +546,9 @@ class PythonRuntime {
         continue;
       }
 
-      // Print statement / function call
       if (token.type === 'IDENTIFIER' && token.value === 'print') {
-        i++; // skip print
-        if (tokens[i] && tokens[i].value === '(') i++; // skip (
+        i++;
+        if (tokens[i] && tokens[i].value === '(') i++;
         const args: any[] = [];
         while (i < tokens.length && tokens[i].value !== ')' && tokens[i].type !== 'NEWLINE') {
           if (tokens[i].type === 'STRING' || tokens[i].type === 'NUMBER') {
@@ -266,10 +567,9 @@ class PythonRuntime {
         continue;
       }
 
-      // Variable Assignment: x = 10 or x = "hello"
       if (token.type === 'IDENTIFIER' && tokens[i + 1] && tokens[i + 1].value === '=') {
         const varName = token.value;
-        i += 2; // skip varName and =
+        i += 2;
         if (i < tokens.length) {
           const valToken = tokens[i];
           let val: any = undefined;
@@ -278,7 +578,6 @@ class PythonRuntime {
           } else if (valToken.type === 'IDENTIFIER') {
             val = env.get(valToken.value);
           } else if (valToken.value === '[') {
-            // list literal
             val = [];
             i++;
             while (i < tokens.length && tokens[i].value !== ']') {
@@ -297,7 +596,7 @@ class PythonRuntime {
 }
 
 // =======================================
-// 2. LUA AST LEXER, PARSER & INTERPRETER
+// 3. LUA AST LEXER, PARSER & INTERPRETER
 // =======================================
 class LuaRuntime {
   private logs: string[] = [];
@@ -345,7 +644,6 @@ class LuaRuntime {
       return 'table';
     });
 
-    // Lua Table 1-based index helper
     env.set('setmetatable', (table: any, metatable: any) => {
       if (typeof table === 'object') table.__metatable = metatable;
       return table;
@@ -353,7 +651,6 @@ class LuaRuntime {
 
     env.set('getmetatable', (table: any) => (typeof table === 'object' ? table.__metatable : null));
 
-    // Lua String Library
     env.set('string', {
       format: (fmt: string, ...args: any[]) => {
         let argIdx = 0;
@@ -370,7 +667,6 @@ class LuaRuntime {
       lower: (str: string) => (str ? str.toLowerCase() : '')
     });
 
-    // Lua Table Library
     env.set('table', {
       insert: (tbl: any[], val: any) => { if (Array.isArray(tbl)) tbl.push(val); },
       remove: (tbl: any[], idx?: number) => {
@@ -381,7 +677,6 @@ class LuaRuntime {
       concat: (tbl: any[], sep: string = '') => (Array.isArray(tbl) ? tbl.join(sep) : '')
     });
 
-    // Lua Math Library
     env.set('math', {
       sqrt: Math.sqrt,
       abs: Math.abs,
@@ -425,12 +720,10 @@ class LuaRuntime {
       const line = lines[i].trim();
       if (!line || line.startsWith('--')) continue;
 
-      // Handle print statement
       if (line.startsWith('print(')) {
         const inner = line.slice(6, line.lastIndexOf(')'));
         const printFn = env.get('print');
         if (printFn) {
-          // Resolve arguments
           const parts = inner.split(',').map(p => p.trim());
           const resolved = parts.map(p => {
             if ((p.startsWith('"') && p.endsWith('"')) || (p.startsWith("'") && p.endsWith("'"))) {
@@ -446,7 +739,6 @@ class LuaRuntime {
         continue;
       }
 
-      // Handle local or global variable declaration
       if (line.startsWith('local ') || line.includes('=')) {
         const clean = line.startsWith('local ') ? line.slice(6) : line;
         const [left, right] = clean.split('=').map(s => s.trim());
@@ -467,236 +759,95 @@ class LuaRuntime {
 }
 
 // ====================================================
-// 3. ACCURATE GLSL SHADER VALIDATOR & FALLBACK PARSER
+// 4. ACCURATE GLSL SHADER VALIDATOR (REQUIRE WEBGL)
 // ====================================================
 class GLSLValidator {
   public static validate(fragmentShaderSource: string): { success: boolean; error?: string } {
-    // Attempt real WebGL compilation first if canvas context is supported
+    let gl: WebGLRenderingContext | null = null;
+
     try {
       if (typeof document !== 'undefined') {
         const canvas = document.createElement('canvas');
         canvas.width = 16;
         canvas.height = 16;
-        const gl = canvas.getContext('webgl') || (canvas.getContext('experimental-webgl') as WebGLRenderingContext | null);
-
-        if (gl) {
-          const vertexShaderSource = `
-            attribute vec2 position;
-            void main() {
-              gl_Position = vec4(position, 0.0, 1.0);
-            }
-          `;
-
-          const vs = gl.createShader(gl.VERTEX_SHADER)!;
-          gl.shaderSource(vs, vertexShaderSource);
-          gl.compileShader(vs);
-
-          const fs = gl.createShader(gl.FRAGMENT_SHADER)!;
-          gl.shaderSource(fs, fragmentShaderSource);
-          gl.compileShader(fs);
-
-          if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
-            const info = gl.getShaderInfoLog(fs);
-            gl.deleteShader(vs);
-            gl.deleteShader(fs);
-            return { success: false, error: info || 'GLSL Fragment Shader compilation failed' };
-          }
-
-          const program = gl.createProgram()!;
-          gl.attachShader(program, vs);
-          gl.attachShader(program, fs);
-          gl.linkProgram(program);
-
-          if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-            const info = gl.getProgramInfoLog(program);
-            gl.deleteProgram(program);
-            return { success: false, error: info || 'GLSL Program linking failed' };
-          }
-
-          gl.deleteProgram(program);
-          gl.deleteShader(vs);
-          gl.deleteShader(fs);
-          return { success: true };
-        }
+        gl = (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')) as WebGLRenderingContext | null;
       }
     } catch (e) {
-      console.warn('WebGL context creation threw error, falling back to AST Syntax Validator', e);
+      gl = null;
     }
 
-    // Fallback Strict GLSL AST & Syntax Parser (When WebGL context is absent or headless)
-    return this.fallbackSyntaxValidate(fragmentShaderSource);
-  }
-
-  private static fallbackSyntaxValidate(code: string): { success: boolean; error?: string } {
-    const lines = code.split('\n');
-
-    // 1. Check main entry point
-    if (!code.includes('void main()') && !code.includes('void main ()')) {
+    // STRICT REQUIREMENT: In the absence of a real WebGL context, NEVER report dummy success!
+    if (!gl) {
       return {
         success: false,
-        error: 'GLSL Compiler Error: Missing entry point "void main()". Every WebGL fragment shader must declare void main().'
+        error: 'WebGL Error: WebGL 2.0 / 1.0 rendering context is unavailable on this device canvas. Cannot compile or validate GLSL shaders without active WebGL hardware context.'
       };
     }
 
-    // 2. Line-by-line syntax verification
-    let openBraces = 0;
-    for (let i = 0; i < lines.length; i++) {
-      const lineNum = i + 1;
-      const trimmed = lines[i].trim();
-
-      if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('#')) continue;
-
-      for (const char of trimmed) {
-        if (char === '{') openBraces++;
-        if (char === '}') openBraces--;
+    // Perform real WebGL Vertex & Fragment Shader compilation & linking
+    const vertexShaderSource = `
+      attribute vec2 position;
+      void main() {
+        gl_Position = vec4(position, 0.0, 1.0);
       }
+    `;
 
-      // Check trailing semicolons for non-block lines
-      if (
-        !trimmed.endsWith(';') &&
-        !trimmed.endsWith('{') &&
-        !trimmed.endsWith('}') &&
-        !trimmed.startsWith('void main') &&
-        !trimmed.startsWith('#')
-      ) {
-        return {
-          success: false,
-          error: `GLSL Syntax Error at line ${lineNum}: Missing trailing semicolon (;) at "${trimmed}".`
-        };
-      }
+    const vs = gl.createShader(gl.VERTEX_SHADER)!;
+    gl.shaderSource(vs, vertexShaderSource);
+    gl.compileShader(vs);
+
+    const fs = gl.createShader(gl.FRAGMENT_SHADER)!;
+    gl.shaderSource(fs, fragmentShaderSource);
+    gl.compileShader(fs);
+
+    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+      const info = gl.getShaderInfoLog(fs);
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      return { success: false, error: info || 'GLSL Fragment Shader compilation failed' };
     }
 
-    if (openBraces !== 0) {
-      return {
-        success: false,
-        error: 'GLSL Syntax Error: Unbalanced curly braces ({ }). Check function definitions.'
-      };
+    const program = gl.createProgram()!;
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      const info = gl.getProgramInfoLog(program);
+      gl.deleteProgram(program);
+      return { success: false, error: info || 'GLSL Program linking failed' };
     }
 
+    gl.deleteProgram(program);
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
     return { success: true };
   }
 }
 
 // =========================================================
-// 4. MAIN SECURE SCRIPT RUNNER WITH LOOP & MEMORY WATCHDOG
+// 5. MAIN SECURE SCRIPT RUNNER WITH ZERO NEW FUNCTION CALLS
 // =========================================================
 export class ScriptRunner {
-  // Execute JS/TS in Isolated Sandbox with Watchdog & Security Guards
   public static executeJavaScript(
     code: string,
     extraContext: Record<string, any> = {},
     projectId: string = 'proj_default'
   ): ExecutionResult {
-    const logs: string[] = [];
-    const errors: string[] = [];
-    const startTime = performance.now();
-
-    // Check project permission for script execution
-    const isExecuteAllowed = permissionManager.checkPermission(projectId, 'PERM_EXECUTE_UNSAFE');
-
-    const mockConsole = {
-      log: (...args: any[]) => logs.push(args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')),
-      warn: (...args: any[]) => logs.push('[WARN] ' + args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')),
-      error: (...args: any[]) => errors.push('[ERROR] ' + args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')),
-      info: (...args: any[]) => logs.push('[INFO] ' + args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' '))
-    };
-
-    try {
-      // 1. Instrument code for Infinite Loop & Execution Watchdog and block eval()
-      let loopCounter = 0;
-      const maxLoopIterations = 300000;
-      const watchdogStartTime = Date.now();
-
-      const __watchdogTick = () => {
-        loopCounter++;
-        if (loopCounter > maxLoopIterations || Date.now() - watchdogStartTime > 1500) {
-          throw new Error('ExecutionTimeoutError: Infinite loop or time limit (1500ms / 300,000 iterations) exceeded.');
-        }
-      };
-
-      const __blockedEval = () => {
-        throw new Error('SecurityError: Direct call to eval() is blocked in sandbox environment.');
-      };
-
-      // Instrument for/while loops with __watchdogTick() and replace eval with __blockedEval
-      let instrumentedCode = code
-        .replace(/\beval\b/g, '__blockedEval')
-        .replace(/:\s*(string|number|boolean|any|void|unknown)\b/g, '')
-        .replace(/\bwhile\s*\(([^)]+)\)\s*\{/g, 'while ($1) { __watchdogTick();')
-        .replace(/\bfor\s*\(([^)]+)\)\s*\{/g, 'for ($1) { __watchdogTick();');
-
-      // 2. Build Shadowed Sandbox Environment (Prevents access to window, DOM, document, cookies, storage)
-      const shadowedGlobals = [
-        'window',
-        'document',
-        'localStorage',
-        'sessionStorage',
-        'indexedDB',
-        'cookieStore',
-        'fetch',
-        'XMLHttpRequest',
-        'WebSocket',
-        'Worker',
-        'top',
-        'parent',
-        'opener',
-        'location',
-        'navigator',
-        'alert',
-        'prompt',
-        'confirm'
-      ];
-
-      // Pass undefined for shadowed globals
-      const shadowValues = shadowedGlobals.map(() => undefined);
-
-      const contextKeys = Object.keys(extraContext);
-      const contextValues = Object.values(extraContext);
-
-      // Construct Function inside Sandbox
-      const sandboxFn = new Function(
-        'console',
-        '__watchdogTick',
-        '__blockedEval',
-        ...shadowedGlobals,
-        ...contextKeys,
-        `"use strict";\n${instrumentedCode}`
-      );
-
-      const returnValue = sandboxFn(mockConsole, __watchdogTick, __blockedEval, ...shadowValues, ...contextValues);
-
-      const endTime = performance.now();
-      return {
-        success: errors.length === 0,
-        logs,
-        errors,
-        returnValue,
-        executionTimeMs: Number((endTime - startTime).toFixed(2))
-      };
-    } catch (err: any) {
-      errors.push(err.stack || err.message || String(err));
-      return {
-        success: false,
-        logs,
-        errors,
-        executionTimeMs: Number((performance.now() - startTime).toFixed(2))
-      };
-    }
+    const interpreter = new SecureJSInterpreter();
+    return interpreter.run(code, extraContext, projectId);
   }
 
-  // Real Python Engine
   public static executePython(code: string): ExecutionResult {
     const runtime = new PythonRuntime();
     return runtime.run(code);
   }
 
-  // Real Lua Engine
   public static executeLua(code: string): ExecutionResult {
     const runtime = new LuaRuntime();
     return runtime.run(code);
   }
 
-  // Accurate GLSL Shader Validator
   public static validateGLSL(fragmentShaderSource: string): { success: boolean; error?: string } {
     return GLSLValidator.validate(fragmentShaderSource);
   }

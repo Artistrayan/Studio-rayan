@@ -4,6 +4,7 @@
  */
 
 import { GitBranch, GitCommit, PullRequest, VFSFile } from '../../types';
+import { CryptoUtils } from '../security/cryptoUtils';
 
 const GIT_STORAGE_KEY = 'aetherforge_git_state';
 
@@ -131,14 +132,14 @@ export class GitEngine {
   }
 
   public commit(message: string, currentFiles: VFSFile[]): GitCommit {
-    const hash = Math.random().toString(16).substring(2, 9);
+    const hash = CryptoUtils.generateHexHash(7);
     const filesSnapshot: Record<string, string> = {};
     currentFiles.forEach(f => {
       filesSnapshot[f.path] = f.content;
     });
 
     const newCommit: GitCommit = {
-      id: 'commit_' + Date.now(),
+      id: CryptoUtils.generateId('commit', 8),
       hash,
       message,
       author: 'Studio Creator <creator@aetherforge.dev>',
@@ -158,7 +159,7 @@ export class GitEngine {
 
   public createPullRequest(title: string, description: string, source: string, target: string = 'main'): PullRequest {
     const pr: PullRequest = {
-      id: 'pr_' + Date.now(),
+      id: CryptoUtils.generateId('pr', 8),
       title,
       description,
       sourceBranch: source,
@@ -177,7 +178,7 @@ export class GitEngine {
     pr.status = 'merged';
 
     // Create a merge commit
-    const hash = Math.random().toString(16).substring(2, 9);
+    const hash = CryptoUtils.generateHexHash(7);
     this.state.commits.unshift({
       id: 'commit_' + Date.now(),
       hash,

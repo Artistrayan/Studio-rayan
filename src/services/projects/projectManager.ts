@@ -7,6 +7,8 @@ import { VFSFile } from '../../types';
 import { DEFAULT_FILES } from '../vfs/fileSystem';
 import { ProjectTemplateId, PROJECT_TEMPLATES } from './projectTemplates';
 import { idbAdapter } from '../vfs/indexedDBAdapter';
+import { FileSanitizer } from '../vfs/fileSanitizer';
+import { CryptoUtils } from '../security/cryptoUtils';
 
 export interface ProjectSnapshot {
   id: string;
@@ -132,7 +134,7 @@ export class ProjectManager {
         template: 'default',
         snapshots: [
           {
-            id: 'snap_v1.0',
+            id: CryptoUtils.generateId('snap', 8),
             projectId: 'proj_default',
             versionLabel: 'v1.0 Initial Boot',
             timestamp: Date.now(),
@@ -140,17 +142,7 @@ export class ProjectManager {
           }
         ]
       };
-      const polProject: StudioProject = {
-        id: 'proj_political',
-        name: 'استراتژی سیاسی و دولت‌داری (Statecraft)',
-        description: 'شبیه‌ساز بازی سیاسی، مدیریت بودجه، محبوبیت مردمی، احزاب و بحران‌های بین‌المللی.',
-        createdAt: Date.now() - 3600000,
-        updatedAt: Date.now() - 1800000,
-        files: [...POLITICAL_GAME_DEFAULT_FILES],
-        template: 'political_strategy',
-        snapshots: []
-      };
-      this.projects = [defaultProject, polProject];
+      this.projects = [defaultProject];
       this.saveProjectsToStorage();
     }
 
@@ -197,8 +189,9 @@ export class ProjectManager {
       files = [...POLITICAL_GAME_DEFAULT_FILES];
     }
 
+    const projectId = CryptoUtils.generateId('proj', 10);
     const newProject: StudioProject = {
-      id: 'proj_' + Date.now() + Math.random().toString(36).substring(2, 6),
+      id: projectId,
       name: name.trim() || 'New Project',
       description: description || (tmpl ? tmpl.descriptionFa : 'Custom Project'),
       createdAt: Date.now(),
@@ -207,8 +200,8 @@ export class ProjectManager {
       template,
       snapshots: [
         {
-          id: 'snap_' + Date.now(),
-          projectId: 'proj_' + Date.now(),
+          id: CryptoUtils.generateId('snap', 8),
+          projectId,
           versionLabel: 'v1.0 Initial Creation',
           timestamp: Date.now(),
           files: [...files]
@@ -223,6 +216,39 @@ export class ProjectManager {
     }
     this.saveProjectsToStorage();
     return newProject;
+  }
+
+  public duplicateProject(projectId: string): StudioProject | null {
+    const target = this.projects.find(p => p.id === projectId);
+    if (!target) return null;
+
+    const newId = CryptoUtils.generateId('proj', 10);
+    const duplicated: StudioProject = {
+      id: newId,
+      name: `${target.name} (Copy)`,
+      description: target.description,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      files: JSON.parse(JSON.stringify(target.files)),
+      template: target.template,
+      snapshots: [
+        {
+          id: CryptoUtils.generateId('snap', 8),
+          projectId: newId,
+          versionLabel: 'v1.0 Duplicated Copy',
+          timestamp: Date.now(),
+          files: JSON.parse(JSON.stringify(target.files))
+        }
+      ]
+    };
+
+    this.projects.unshift(duplicated);
+    this.activeProjectId = duplicated.id;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(ACTIVE_PROJECT_ID_KEY, duplicated.id);
+    }
+    this.saveProjectsToStorage();
+    return duplicated;
   }
 
   // PROJECT VERSION HISTORY & SNAPSHOT SYSTEM
@@ -294,10 +320,15 @@ export class ProjectManager {
     return JSON.stringify(target || this.getActiveProject(), null, 2);
   }
 
-  // PROJECT IMPORT SCHEMA VALIDATOR
+  // PROJECT IMPORT SCHEMA VALIDATOR WITH MALWARE & CORRUPTION SANITIZER
   public validateProjectJSON(jsonString: string): { valid: boolean; error?: string; project?: StudioProject } {
     try {
-      const parsed = JSON.parse(jsonString);
+      const sanitizedRoot = FileSanitizer.sanitizeImportedFile('project.json', jsonString);
+      if (!sanitizedRoot.valid) {
+        return { valid: false, error: `فایل پروژه نامعتبر است: ${sanitizedRoot.error}` };
+      }
+
+      const parsed = JSON.parse(sanitizedRoot.cleanContent || jsonString);
       if (!parsed || typeof parsed !== 'object') {
         return { valid: false, error: 'تغییرات فایل JSON نامعتبر است (فرمت غیر استاندارد).' };
       }
@@ -310,6 +341,14 @@ export class ProjectManager {
       for (const f of parsed.files) {
         if (!f.path || typeof f.content !== 'string') {
           return { valid: false, error: `فایل ساختاری نامعتبر در پروژه: ${f.name || 'آدرس نامشخص'}` };
+        }
+        // Sanitize individual file contents
+        const fileCheck = FileSanitizer.sanitizeImportedFile(f.name || f.path, f.content);
+        if (!fileCheck.valid) {
+          return { valid: false, error: `محتوای آلوده یا خراب در فایل ${f.name}: ${fileCheck.error}` };
+        }
+        if (fileCheck.cleanContent) {
+          f.content = fileCheck.cleanContent;
         }
       }
       return { valid: true, project: parsed };

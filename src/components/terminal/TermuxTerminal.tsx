@@ -9,6 +9,7 @@ import { ScriptRunner } from '../../services/engine/scriptRunner';
 import { EngineTestRunner } from '../../services/engine/testRunner';
 import { gitEngine } from '../../services/git/gitEngine';
 import { soundSynth } from '../../services/audio/synth';
+import { CryptoUtils } from '../../services/security/cryptoUtils';
 import {
   Terminal as TerminalIcon,
   Plus,
@@ -165,8 +166,8 @@ export const TermuxTerminal: React.FC = () => {
       }
       const res = ScriptRunner.executePython(trimmed);
       const linesToAdd: TerminalLine[] = [{ id: 'p_' + Date.now(), type: 'prompt', text: `>>> ${trimmed}` }];
-      res.logs.forEach(l => linesToAdd.push({ id: 'pl_' + Math.random(), type: 'output', text: l }));
-      res.errors.forEach(e => linesToAdd.push({ id: 'pe_' + Math.random(), type: 'error', text: e }));
+      res.logs.forEach(l => linesToAdd.push({ id: CryptoUtils.generateId('plog'), type: 'output', text: l }));
+      res.errors.forEach(e => linesToAdd.push({ id: CryptoUtils.generateId('perr'), type: 'error', text: e }));
       appendLines(linesToAdd);
       setInput('');
       return;
@@ -187,8 +188,8 @@ export const TermuxTerminal: React.FC = () => {
       }
       const res = ScriptRunner.executeJavaScript(trimmed, nodeScope.current);
       const linesToAdd: TerminalLine[] = [{ id: 'n_' + Date.now(), type: 'prompt', text: `> ${trimmed}` }];
-      res.logs.forEach(l => linesToAdd.push({ id: 'nl_' + Math.random(), type: 'output', text: l }));
-      res.errors.forEach(e => linesToAdd.push({ id: 'ne_' + Math.random(), type: 'error', text: e }));
+      res.logs.forEach(l => linesToAdd.push({ id: CryptoUtils.generateId('nlog'), type: 'output', text: l }));
+      res.errors.forEach(e => linesToAdd.push({ id: CryptoUtils.generateId('nerr'), type: 'error', text: e }));
       if (res.returnValue !== undefined) {
         linesToAdd.push({
           id: 'nret_' + Date.now(),
@@ -312,7 +313,21 @@ export const TermuxTerminal: React.FC = () => {
           .replace(/cos/g, 'Math.cos')
           .replace(/sqrt/g, 'Math.sqrt')
           .replace(/pi/g, 'Math.PI');
-        const evaluated = new Function(`return (${cleanExpr})`)();
+        // Safe evaluation without Function constructor
+        const tokens = cleanExpr.split(/([+\-*/])/).map(t => t.trim());
+        let evaluated = 0;
+        let currentOp = '+';
+        tokens.forEach(tok => {
+          if (['+', '-', '*', '/'].includes(tok)) {
+            currentOp = tok;
+          } else {
+            const num = parseFloat(tok) || 0;
+            if (currentOp === '+') evaluated += num;
+            if (currentOp === '-') evaluated -= num;
+            if (currentOp === '*') evaluated *= num;
+            if (currentOp === '/') evaluated /= num;
+          }
+        });
         outputList.push({ id: 'calc_' + Date.now(), type: 'output', text: `Result: ${evaluated}` });
       } catch (err: any) {
         outputList.push({ id: 'calc_err_' + Date.now(), type: 'error', text: `Math error: ${err.message}` });
@@ -459,8 +474,8 @@ API_SECRET_KEY=********************`
       const target = files.find(f => f.name === args[0] || f.path === args[0]);
       if (target) {
         const res = ScriptRunner.executeLua(target.content);
-        res.logs.forEach(l => outputList.push({ id: 'll_' + Math.random(), type: 'output', text: l }));
-        res.errors.forEach(e => outputList.push({ id: 'le_' + Math.random(), type: 'error', text: e }));
+      res.logs.forEach(l => outputList.push({ id: CryptoUtils.generateId('log'), type: 'output', text: l }));
+      res.errors.forEach(e => outputList.push({ id: CryptoUtils.generateId('err'), type: 'error', text: e }));
       } else {
         outputList.push({ id: 'le_' + Date.now(), type: 'error', text: `lua: cannot open '${args[0]}'` });
       }

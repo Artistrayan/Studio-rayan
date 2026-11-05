@@ -21,7 +21,8 @@ import {
   Layers,
   Landmark,
   FileCode,
-  Clock
+  Clock,
+  Copy
 } from 'lucide-react';
 
 export const ProjectModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
@@ -108,6 +109,16 @@ export const ProjectModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
     projectManager.saveCurrentProjectFiles(files);
     soundSynth.playCoin();
     addLog('کل محتویات و فایل‌های پروژه با موفقیت ذخیره شد.', 'info');
+  };
+
+  const handleDuplicateProject = (id: string) => {
+    soundSynth.playPowerup();
+    const dup = projectManager.duplicateProject(id);
+    if (dup) {
+      refreshList();
+      addLog(`پروژه کپی شد: ${dup.name}`, 'info');
+      window.location.reload();
+    }
   };
 
   // Export / Download Project JSON
@@ -374,6 +385,14 @@ export const ProjectModal: React.FC<{ isOpen: boolean; onClose: () => void }> = 
                       title="تغییر نام پروژه"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => handleDuplicateProject(proj.id)}
+                      className="p-1.5 rounded hover:bg-[#25293a] text-gray-400 hover:text-cyan-300 cursor-pointer"
+                      title="کپی / دابلیکیت پروژه"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
                     </button>
 
                     <button
