@@ -280,26 +280,21 @@ fn main() {
     return await zip.generateAsync({ type: 'blob' });
   }
 
-  // Generate API Keys and Secrets
-  public static generateApiKey(scope: string = 'read_write'): { key: string; secret: string; jwt: string } {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let key = 'af_live_';
-    for (let i = 0; i < 28; i++) key += chars.charAt(Math.floor(Math.random() * chars.length));
+  // Generate Cryptographically Secure API Keys, Secrets & Signed JWT
+  public static async generateApiKey(scope: string = 'read_write'): Promise<{ key: string; secret: string; jwt: string }> {
+    const { CryptoJWTEngine } = await import('../auth/jwtEngine');
+    const key = 'af_live_' + CryptoJWTEngine.generateSecureRandomString(28);
+    const secret = 'sec_' + CryptoJWTEngine.generateSecureRandomString(40);
 
-    let secret = 'sec_';
-    for (let i = 0; i < 40; i++) secret += chars.charAt(Math.floor(Math.random() * chars.length));
-
-    const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-    const payload = btoa(JSON.stringify({
+    const payload = {
       iss: 'aetherforge.studio',
       sub: key,
       scope,
       iat: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + (3600 * 24 * 365)
-    }));
-    const signature = btoa('verified_signature_' + Math.random().toString(36).substring(2, 10));
-    const jwt = `${header}.${payload}.${signature}`;
+    };
 
+    const jwt = await CryptoJWTEngine.signJWT(payload, secret);
     return { key, secret, jwt };
   }
 

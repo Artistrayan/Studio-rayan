@@ -6,6 +6,15 @@
 import { VFSFile } from '../../types';
 import { DEFAULT_FILES } from '../vfs/fileSystem';
 import { ProjectTemplateId, PROJECT_TEMPLATES } from './projectTemplates';
+import { idbAdapter } from '../vfs/indexedDBAdapter';
+
+export interface ProjectSnapshot {
+  id: string;
+  projectId: string;
+  versionLabel: string;
+  timestamp: number;
+  files: VFSFile[];
+}
 
 export interface StudioProject {
   id: string;
@@ -15,6 +24,7 @@ export interface StudioProject {
   updatedAt: number;
   files: VFSFile[];
   template: ProjectTemplateId | 'default';
+  snapshots?: ProjectSnapshot[];
 }
 
 const PROJECTS_STORAGE_KEY = 'aetherforge_all_projects';
@@ -85,16 +95,29 @@ export class ProjectManager {
     this.init();
   }
 
-  private init() {
-    const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
-    if (raw) {
-      try {
-        const parsed: StudioProject[] = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          this.projects = parsed;
+  private async init() {
+    let loadedFromIDB = false;
+    try {
+      const idbProjects = await idbAdapter.getAll<StudioProject>('projects');
+      if (idbProjects && idbProjects.length > 0) {
+        this.projects = idbProjects;
+        loadedFromIDB = true;
+      }
+    } catch (e) {
+      console.warn('Failed to load from IndexedDB, using localStorage', e);
+    }
+
+    if (!loadedFromIDB && typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
+      if (raw) {
+        try {
+          const parsed: StudioProject[] = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.projects = parsed;
+          }
+        } catch (e) {
+          console.warn('Failed to parse projects list', e);
         }
-      } catch (e) {
-        console.warn('Failed to parse projects list', e);
       }
     }
 
@@ -106,7 +129,16 @@ export class ProjectManager {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         files: [...DEFAULT_FILES],
-        template: 'default'
+        template: 'default',
+        snapshots: [
+          {
+            id: 'snap_v1.0',
+            projectId: 'proj_default',
+            versionLabel: 'v1.0 Initial Boot',
+            timestamp: Date.now(),
+            files: [...DEFAULT_FILES]
+          }
+        ]
       };
       const polProject: StudioProject = {
         id: 'proj_political',
@@ -115,15 +147,20 @@ export class ProjectManager {
         createdAt: Date.now() - 3600000,
         updatedAt: Date.now() - 1800000,
         files: [...POLITICAL_GAME_DEFAULT_FILES],
-        template: 'political_strategy'
+        template: 'political_strategy',
+        snapshots: []
       };
       this.projects = [defaultProject, polProject];
       this.saveProjectsToStorage();
     }
 
-    const savedActive = localStorage.getItem(ACTIVE_PROJECT_ID_KEY);
-    if (savedActive && this.projects.some(p => p.id === savedActive)) {
-      this.activeProjectId = savedActive;
+    if (typeof localStorage !== 'undefined') {
+      const savedActive = localStorage.getItem(ACTIVE_PROJECT_ID_KEY);
+      if (savedActive && this.projects.some(p => p.id === savedActive)) {
+        this.activeProjectId = savedActive;
+      } else {
+        this.activeProjectId = this.projects[0].id;
+      }
     } else {
       this.activeProjectId = this.projects[0].id;
     }
@@ -141,7 +178,9 @@ export class ProjectManager {
     const proj = this.projects.find(p => p.id === id);
     if (!proj) return null;
     this.activeProjectId = id;
-    localStorage.setItem(ACTIVE_PROJECT_ID_KEY, id);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(ACTIVE_PROJECT_ID_KEY, id);
+    }
     return proj;
   }
 
@@ -154,7 +193,7 @@ export class ProjectManager {
     const tmpl = PROJECT_TEMPLATES.find(t => t.id === template);
     if (tmpl && tmpl.files.length > 0) {
       files = [...tmpl.files, ...DEFAULT_FILES.filter(df => !tmpl.files.some(tf => tf.path === df.path))];
-    } else if (template === 'political_strategy' as any) {
+    } else if (template === ('political_strategy' as any)) {
       files = [...POLITICAL_GAME_DEFAULT_FILES];
     }
 
@@ -165,14 +204,58 @@ export class ProjectManager {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       files,
-      template
+      template,
+      snapshots: [
+        {
+          id: 'snap_' + Date.now(),
+          projectId: 'proj_' + Date.now(),
+          versionLabel: 'v1.0 Initial Creation',
+          timestamp: Date.now(),
+          files: [...files]
+        }
+      ]
     };
 
     this.projects.unshift(newProject);
     this.activeProjectId = newProject.id;
-    localStorage.setItem(ACTIVE_PROJECT_ID_KEY, newProject.id);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(ACTIVE_PROJECT_ID_KEY, newProject.id);
+    }
     this.saveProjectsToStorage();
     return newProject;
+  }
+
+  // PROJECT VERSION HISTORY & SNAPSHOT SYSTEM
+  public createSnapshot(projectId?: string, label?: string): ProjectSnapshot | null {
+    const target = projectId ? this.projects.find(p => p.id === projectId) : this.getActiveProject();
+    if (!target) return null;
+
+    if (!target.snapshots) target.snapshots = [];
+    const count = target.snapshots.length + 1;
+    const snapshot: ProjectSnapshot = {
+      id: 'snap_' + Date.now(),
+      projectId: target.id,
+      versionLabel: label || `v1.${count} Snapshot (${new Date().toLocaleTimeString()})`,
+      timestamp: Date.now(),
+      files: JSON.parse(JSON.stringify(target.files))
+    };
+
+    target.snapshots.unshift(snapshot);
+    this.saveProjectsToStorage();
+    return snapshot;
+  }
+
+  public rollbackToSnapshot(snapshotId: string): boolean {
+    const target = this.getActiveProject();
+    if (!target || !target.snapshots) return false;
+
+    const snap = target.snapshots.find(s => s.id === snapshotId);
+    if (!snap) return false;
+
+    target.files = JSON.parse(JSON.stringify(snap.files));
+    target.updatedAt = Date.now();
+    this.saveProjectsToStorage();
+    return true;
   }
 
   public renameProject(id: string, newName: string): boolean {
@@ -185,11 +268,13 @@ export class ProjectManager {
   }
 
   public deleteProject(id: string): boolean {
-    if (this.projects.length <= 1) return false; // Keep at least one project
+    if (this.projects.length <= 1) return false;
     this.projects = this.projects.filter(p => p.id !== id);
     if (this.activeProjectId === id) {
       this.activeProjectId = this.projects[0].id;
-      localStorage.setItem(ACTIVE_PROJECT_ID_KEY, this.activeProjectId);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(ACTIVE_PROJECT_ID_KEY, this.activeProjectId);
+      }
     }
     this.saveProjectsToStorage();
     return true;
@@ -209,37 +294,72 @@ export class ProjectManager {
     return JSON.stringify(target || this.getActiveProject(), null, 2);
   }
 
-  public importProjectJSON(jsonString: string): StudioProject | null {
+  // PROJECT IMPORT SCHEMA VALIDATOR
+  public validateProjectJSON(jsonString: string): { valid: boolean; error?: string; project?: StudioProject } {
     try {
       const parsed = JSON.parse(jsonString);
-      if (parsed.name && Array.isArray(parsed.files)) {
-        const importedProject: StudioProject = {
-          id: 'proj_' + Date.now(),
-          name: parsed.name + ' (Imported)',
-          description: parsed.description || 'Imported project file',
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          files: parsed.files,
-          template: parsed.template || 'default'
-        };
-        this.projects.unshift(importedProject);
-        this.activeProjectId = importedProject.id;
-        localStorage.setItem(ACTIVE_PROJECT_ID_KEY, importedProject.id);
-        this.saveProjectsToStorage();
-        return importedProject;
+      if (!parsed || typeof parsed !== 'object') {
+        return { valid: false, error: 'تغییرات فایل JSON نامعتبر است (فرمت غیر استاندارد).' };
       }
-    } catch (e) {
-      console.error('Invalid project JSON', e);
+      if (!parsed.name || typeof parsed.name !== 'string') {
+        return { valid: false, error: 'فایل پروژه نامعتبر است: نام پروژه (name) وجود ندارد.' };
+      }
+      if (!Array.isArray(parsed.files) || parsed.files.length === 0) {
+        return { valid: false, error: 'فایل پروژه نامعتبر است: فهرست فایل‌های پروژه (files) خالی است.' };
+      }
+      for (const f of parsed.files) {
+        if (!f.path || typeof f.content !== 'string') {
+          return { valid: false, error: `فایل ساختاری نامعتبر در پروژه: ${f.name || 'آدرس نامشخص'}` };
+        }
+      }
+      return { valid: true, project: parsed };
+    } catch (e: any) {
+      return { valid: false, error: `خطای سینتکس در فایل JSON: ${e.message}` };
     }
-    return null;
   }
 
+  public importProjectJSON(jsonString: string): StudioProject | null {
+    const validation = this.validateProjectJSON(jsonString);
+    if (!validation.valid || !validation.project) {
+      console.warn('Import failed:', validation.error);
+      return null;
+    }
+
+    const parsed = validation.project;
+    const importedProject: StudioProject = {
+      id: 'proj_' + Date.now(),
+      name: parsed.name + ' (Imported)',
+      description: parsed.description || 'Imported project file',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      files: parsed.files,
+      template: parsed.template || 'default',
+      snapshots: parsed.snapshots || []
+    };
+
+    this.projects.unshift(importedProject);
+    this.activeProjectId = importedProject.id;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(ACTIVE_PROJECT_ID_KEY, importedProject.id);
+    }
+    this.saveProjectsToStorage();
+    return importedProject;
+  }
+
+  // ATOMIC PERSISTENCE & AUTO-SAVE TO INDEXEDDB + LOCALSTORAGE
   private saveProjectsToStorage() {
     try {
-      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(this.projects));
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(this.projects));
+      }
     } catch (e) {
-      console.warn('Failed to persist projects to storage', e);
+      console.warn('LocalStorage quota exceeded, relying on IndexedDB', e);
     }
+
+    // Persist to IndexedDB
+    this.projects.forEach(p => {
+      idbAdapter.setItem('projects', p.id, p);
+    });
   }
 }
 

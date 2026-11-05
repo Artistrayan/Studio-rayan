@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStudio } from '../../context/StudioContext';
 import { ProjectPackager } from '../../services/export/packager';
 import { soundSynth } from '../../services/audio/synth';
@@ -25,8 +25,16 @@ export const ExportView: React.FC = () => {
   const { files, addLog } = useStudio();
   const [projectName, setProjectName] = useState<string>('AetherForge_Game');
   const [isExporting, setIsExporting] = useState<boolean>(false);
-  const [apiKeys, setApiKeys] = useState(() => ProjectPackager.generateApiKey());
+  const [apiKeys, setApiKeys] = useState<{ key: string; secret: string; jwt: string }>({
+    key: 'af_live_loading...',
+    secret: 'sec_loading...',
+    jwt: 'jwt_loading...'
+  });
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    ProjectPackager.generateApiKey().then(setApiKeys);
+  }, []);
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -109,11 +117,12 @@ export const ExportView: React.FC = () => {
     }
   };
 
-  // Re-generate API Keys
-  const handleRegenerateKeys = () => {
+  // Re-generate API Keys & Signed JWT
+  const handleRegenerateKeys = async () => {
     soundSynth.playCoin();
-    setApiKeys(ProjectPackager.generateApiKey());
-    addLog('Generated new project credentials and API key pair.', 'info');
+    const keys = await ProjectPackager.generateApiKey();
+    setApiKeys(keys);
+    addLog('Generated new cryptographically signed API key pair & HMAC-SHA256 JWT token.', 'info');
   };
 
   return (

@@ -10,8 +10,24 @@ import { WorkspaceMode } from '../../types';
 import { projectManager } from '../../services/projects/projectManager';
 import { ProjectModal } from '../projects/ProjectModal';
 import { DesignToCodeModal } from '../design2code/DesignToCodeModal';
+import { PermissionSettingsModal } from '../security/PermissionSettingsModal';
+import { ShortcutManagerModal } from './ShortcutManagerModal';
+import { InteractiveOnboardingModal } from './InteractiveOnboardingModal';
+import { PerformanceStressModal } from '../debugger/PerformanceStressModal';
+import { LicenseAuditorModal } from '../security/LicenseAuditorModal';
+import { CICDStatusModal } from '../export/CICDStatusModal';
+import { EngineDocViewerModal } from './EngineDocViewerModal';
+import { ProjectSettingsModal } from '../projects/ProjectSettingsModal';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
 import {
+  ShieldCheck,
+  BookOpen,
+  Keyboard,
+  Compass,
+  Settings,
+  Scale,
+  Activity,
+  Terminal,
   Gamepad2,
   Grid,
   Volume2,
@@ -21,13 +37,11 @@ import {
   Layout,
   Database,
   Globe,
-  Activity,
   Code2,
   Box,
   Landmark,
   Workflow,
   Palette,
-  Terminal,
   GitBranch,
   Download,
   FolderOpen,
@@ -81,6 +95,14 @@ export const TopNavBar: React.FC = () => {
   const t = translations[language];
   const [showProjectsModal, setShowProjectsModal] = useState<boolean>(false);
   const [showDesignModal, setShowDesignModal] = useState<boolean>(false);
+  const [showPermissionsModal, setShowPermissionsModal] = useState<boolean>(false);
+  const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
+  const [showOnboardingModal, setShowOnboardingModal] = useState<boolean>(false);
+  const [showStressModal, setShowStressModal] = useState<boolean>(false);
+  const [showLicenseModal, setShowLicenseModal] = useState<boolean>(false);
+  const [showCICDModal, setShowCICDModal] = useState<boolean>(false);
+  const [showDocsModal, setShowDocsModal] = useState<boolean>(false);
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [isQuickSearchOpen, setIsQuickSearchOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -481,6 +503,103 @@ export const TopNavBar: React.FC = () => {
           {/* PWA Direct Installation Button */}
           <PWAInstallButton />
 
+          {/* Interactive Onboarding Tour */}
+          <button
+            onClick={() => {
+              soundSynth.playCoin();
+              setShowOnboardingModal(true);
+            }}
+            className="p-1.5 rounded-lg bg-[#20232c] hover:bg-[#282d38] text-cyan-400 border border-[#2f3444] cursor-pointer"
+            title="راهنمای تعاملی / Interactive Tour (F1)"
+          >
+            <Compass className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Keyboard Shortcuts Cheat Sheet */}
+          <button
+            onClick={() => {
+              soundSynth.playCoin();
+              setShowShortcutsModal(true);
+            }}
+            className="p-1.5 rounded-lg bg-[#20232c] hover:bg-[#282d38] text-cyan-400 border border-[#2f3444] cursor-pointer"
+            title="میانبرهای کیبورد / Keyboard Shortcuts (Ctrl + /)"
+          >
+            <Keyboard className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Engine API Docs */}
+          <button
+            onClick={() => {
+              soundSynth.playCoin();
+              setShowDocsModal(true);
+            }}
+            className="p-1.5 rounded-lg bg-[#20232c] hover:bg-[#282d38] text-indigo-400 border border-[#2f3444] cursor-pointer"
+            title="مستندات API موتور / Engine Docs"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+          </button>
+
+          {/* CI/CD Build Pipeline */}
+          <button
+            onClick={() => {
+              soundSynth.playCoin();
+              setShowCICDModal(true);
+            }}
+            className="p-1.5 rounded-lg bg-[#20232c] hover:bg-[#282d38] text-emerald-400 border border-[#2f3444] cursor-pointer"
+            title="خط لوله بیلد خودکار CI/CD"
+          >
+            <Terminal className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Large Project Stress Benchmarker */}
+          <button
+            onClick={() => {
+              soundSynth.playCoin();
+              setShowStressModal(true);
+            }}
+            className="p-1.5 rounded-lg bg-[#20232c] hover:bg-[#282d38] text-amber-400 border border-[#2f3444] cursor-pointer"
+            title="تست فشار پروژه‌های بزرگ / Stress Test"
+          >
+            <Activity className="w-3.5 h-3.5" />
+          </button>
+
+          {/* License Auditor */}
+          <button
+            onClick={() => {
+              soundSynth.playCoin();
+              setShowLicenseModal(true);
+            }}
+            className="p-1.5 rounded-lg bg-[#20232c] hover:bg-[#282d38] text-purple-400 border border-[#2f3444] cursor-pointer"
+            title="بررسی مجوزهای متن‌باز / Open Source License Audit"
+          >
+            <Scale className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Global Project Settings */}
+          <button
+            onClick={() => {
+              soundSynth.playCoin();
+              setShowSettingsModal(true);
+            }}
+            className="p-1.5 rounded-lg bg-[#20232c] hover:bg-[#282d38] text-gray-300 border border-[#2f3444] cursor-pointer"
+            title="تنظیمات کلی پروژه و فیزیک"
+          >
+            <Settings className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Security & Sandboxing Permissions Button */}
+          <button
+            onClick={() => {
+              soundSynth.playCoin();
+              setShowPermissionsModal(true);
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-500/40 hover:bg-emerald-900/40 text-emerald-300 text-xs font-medium cursor-pointer transition-all"
+            title="مدیریت سطح دسترسی و امنیت سندبکس"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden lg:inline">امنیت</span>
+          </button>
+
           {/* Convert Design to Code Quick Button */}
           <button
             onClick={() => {
@@ -547,79 +666,17 @@ export const TopNavBar: React.FC = () => {
         </div>
       </header>
 
-      {/* Quick Search Palette Modal (Ctrl+K) */}
-      {isQuickSearchOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center pt-20 bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150"
-          onClick={() => setIsQuickSearchOpen(false)}
-        >
-          <div
-            className="w-full max-w-xl bg-[#171922] border border-[#34394c] rounded-2xl shadow-2xl overflow-hidden flex flex-col"
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Search Input Bar */}
-            <div className="p-3.5 border-b border-[#282d3e] flex items-center gap-3 bg-[#13151c]">
-              <Search className="w-4 h-4 text-cyan-400 shrink-0" />
-              <input
-                type="text"
-                autoFocus
-                placeholder="جستجوی ابزارها (مثلاً: ادیتور، تایل‌مپ، فیزیک، پایتون، SQLite، بلندر)..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="w-full bg-transparent text-sm text-white placeholder-gray-500 focus:outline-none"
-              />
-              <kbd className="text-[10px] text-gray-500 font-mono px-2 py-0.5 rounded bg-[#20232e]">ESC</kbd>
-            </div>
-
-            {/* Filtered Tools List */}
-            <div className="max-h-96 overflow-y-auto p-2 space-y-1">
-              {filteredTools.map(tool => {
-                const ToolIcon = tool.icon;
-                const isToolActive = workspace === tool.id;
-                const parentCat = categories.find(c => c.tools.some(t => t.id === tool.id));
-
-                return (
-                  <button
-                    key={tool.id}
-                    onClick={() => handleSelectTool(tool.id)}
-                    className={`w-full p-2.5 rounded-xl text-left flex items-center justify-between gap-3 transition-all cursor-pointer ${
-                      isToolActive
-                        ? 'bg-cyan-500/15 border border-cyan-500/40 text-cyan-300'
-                        : 'hover:bg-[#20232f] text-gray-200 border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                        style={{ backgroundColor: `${parentCat?.color || '#3b82f6'}20`, color: parentCat?.color }}
-                      >
-                        <ToolIcon className="w-4 h-4" />
-                      </div>
-                      <div className="truncate">
-                        <div className="text-xs font-bold text-white truncate">
-                          {language === 'fa' ? tool.name : tool.nameEn}
-                        </div>
-                        <div className="text-[11px] text-gray-400 truncate">
-                          {tool.description}
-                        </div>
-                      </div>
-                    </div>
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-[#232736] text-gray-400 shrink-0 font-mono">
-                      {tool.tag}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Project Manager Modal */}
+      {/* Modals */}
       <ProjectModal isOpen={showProjectsModal} onClose={() => setShowProjectsModal(false)} />
-
-      {/* Design to Code Modal */}
       <DesignToCodeModal isOpen={showDesignModal} onClose={() => setShowDesignModal(false)} />
+      <PermissionSettingsModal isOpen={showPermissionsModal} onClose={() => setShowPermissionsModal(false)} />
+      <ShortcutManagerModal isOpen={showShortcutsModal} onClose={() => setShowShortcutsModal(false)} />
+      <InteractiveOnboardingModal isOpen={showOnboardingModal} onClose={() => setShowOnboardingModal(false)} />
+      <PerformanceStressModal isOpen={showStressModal} onClose={() => setShowStressModal(false)} />
+      <LicenseAuditorModal isOpen={showLicenseModal} onClose={() => setShowLicenseModal(false)} />
+      <CICDStatusModal isOpen={showCICDModal} onClose={() => setShowCICDModal(false)} />
+      <EngineDocViewerModal isOpen={showDocsModal} onClose={() => setShowDocsModal(false)} />
+      <ProjectSettingsModal isOpen={showSettingsModal} onClose={() => setShowSettingsModal(false)} />
     </>
   );
 };

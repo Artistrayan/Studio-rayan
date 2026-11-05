@@ -56,6 +56,7 @@ export const CodeEditor: React.FC = () => {
   const [newFileName, setNewFileName] = useState<string>('');
   const [showNewFileInput, setShowNewFileInput] = useState<boolean>(false);
   const [showDiagnostics, setShowDiagnostics] = useState<boolean>(true);
+  const [breakpoints, setBreakpoints] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     if (activeFile) {
@@ -449,14 +450,30 @@ export const CodeEditor: React.FC = () => {
 
         {/* Code Editor Body with Gutter & Issue Dots */}
         <div className="flex-1 flex overflow-hidden relative font-mono text-xs">
-          {/* Line Numbers Gutter with Diagnostics Indicator */}
+          {/* Line Numbers Gutter with Breakpoint Toggles & Diagnostics Indicator */}
           <div className="w-14 bg-[#101217] text-[#475569] text-right pr-2 pt-3 select-none border-r border-[#1e222d] shrink-0 overflow-hidden leading-5">
             {lines.map((_, i) => {
               const lineNum = i + 1;
               const lineIssue = lineIssueMap.get(lineNum);
+              const hasBreakpoint = breakpoints.has(lineNum);
               return (
-                <div key={i} className="flex items-center justify-end gap-1">
-                  {lineIssue ? (
+                <div
+                  key={i}
+                  onClick={() => {
+                    setBreakpoints(prev => {
+                      const next = new Set(prev);
+                      if (next.has(lineNum)) next.delete(lineNum);
+                      else next.add(lineNum);
+                      return next;
+                    });
+                    soundSynth.playCoin();
+                  }}
+                  className="flex items-center justify-end gap-1 cursor-pointer hover:text-white"
+                  title={`خط ${lineNum} - برای ثبت Breakpoint کلیک کنید`}
+                >
+                  {hasBreakpoint ? (
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500 shadow-sm shadow-red-500/50 shrink-0" title="Breakpoint Active" />
+                  ) : lineIssue ? (
                     <span
                       title={`${lineIssue.title}: ${lineIssue.description}`}
                       className="w-2 h-2 rounded-full bg-amber-400 animate-pulse cursor-help"

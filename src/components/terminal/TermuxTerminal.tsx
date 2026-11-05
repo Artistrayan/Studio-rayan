@@ -6,6 +6,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStudio } from '../../context/StudioContext';
 import { ScriptRunner } from '../../services/engine/scriptRunner';
+import { EngineTestRunner } from '../../services/engine/testRunner';
 import { gitEngine } from '../../services/git/gitEngine';
 import { soundSynth } from '../../services/audio/synth';
 import {
@@ -338,45 +339,118 @@ export const TermuxTerminal: React.FC = () => {
 
     // Interactive Python or Python Script
     else if (cmd === 'python' || cmd === 'python3') {
-      if (!args[0] || args[0] === '-i') {
+      if (args[0] === '-v' || args[0] === '--version') {
+        outputList.push({ id: 'pyv_' + Date.now(), type: 'output', text: 'Python 3.12.0 (Pyodide WebAssembly AST Runtime)' });
+      } else if (!args[0] || args[0] === '-i') {
         outputList.push({
           id: 'py_repl_' + Date.now(),
           type: 'info',
-          text: 'Python 3.12.2 Interactive REPL. Type expressions or "exit()" to quit.'
+          text: 'Python 3.12.0 Interactive REPL. Type expressions or "exit()" to quit.'
         });
         appendLines(outputList, 'python_repl');
         setInput('');
         return;
-      }
-      const target = files.find(f => f.name === args[0] || f.path === args[0]);
-      if (target) {
-        const res = ScriptRunner.executePython(target.content);
-        res.logs.forEach(l => outputList.push({ id: 'pl_' + Math.random(), type: 'output', text: l }));
-        res.errors.forEach(e => outputList.push({ id: 'pe_' + Math.random(), type: 'error', text: e }));
       } else {
-        outputList.push({ id: 'pe_' + Date.now(), type: 'error', text: `python: file not found: '${args[0]}'` });
+        const target = files.find(f => f.name === args[0] || f.path === args[0]);
+        if (target) {
+          const res = ScriptRunner.executePython(target.content);
+          res.logs.forEach(l => outputList.push({ id: 'pl_' + Math.random(), type: 'output', text: l }));
+          res.errors.forEach(e => outputList.push({ id: 'pe_' + Math.random(), type: 'error', text: e }));
+        } else {
+          outputList.push({ id: 'pe_' + Date.now(), type: 'error', text: `python: file not found: '${args[0]}'` });
+        }
       }
     }
 
     // Interactive Node or Node Script
     else if (cmd === 'node') {
-      if (!args[0] || args[0] === '-i') {
+      if (args[0] === '-v' || args[0] === '--version') {
+        outputList.push({ id: 'nodev_' + Date.now(), type: 'output', text: 'v22.23.3' });
+      } else if (!args[0] || args[0] === '-i') {
         outputList.push({
           id: 'node_repl_' + Date.now(),
           type: 'info',
-          text: 'Node.js v20.12.0 Interactive REPL. Type JavaScript expressions or "exit" to quit.'
+          text: 'Node.js v22.23.3 Interactive REPL. Type JavaScript expressions or "exit" to quit.'
         });
         appendLines(outputList, 'node_repl');
         setInput('');
         return;
-      }
-      const target = files.find(f => f.name === args[0] || f.path === args[0]);
-      if (target) {
-        const res = ScriptRunner.executeJavaScript(target.content);
-        res.logs.forEach(l => outputList.push({ id: 'nl_' + Math.random(), type: 'output', text: l }));
-        res.errors.forEach(e => outputList.push({ id: 'ne_' + Math.random(), type: 'error', text: e }));
       } else {
-        outputList.push({ id: 'ne_' + Date.now(), type: 'error', text: `node: cannot find file '${args[0]}'` });
+        const target = files.find(f => f.name === args[0] || f.path === args[0]);
+        if (target) {
+          const res = ScriptRunner.executeJavaScript(target.content);
+          res.logs.forEach(l => outputList.push({ id: 'nl_' + Math.random(), type: 'output', text: l }));
+          res.errors.forEach(e => outputList.push({ id: 'ne_' + Math.random(), type: 'error', text: e }));
+        } else {
+          outputList.push({ id: 'ne_' + Date.now(), type: 'error', text: `node: cannot find file '${args[0]}'` });
+        }
+      }
+    }
+
+    // NPM Package Manager & Test Runner
+    else if (cmd === 'npm') {
+      if (args[0] === '-v' || args[0] === '--version') {
+        outputList.push({ id: 'npmv_' + Date.now(), type: 'output', text: '10.8.1' });
+      } else if (args[0] === 'test') {
+        outputList.push({ id: 'tstart_' + Date.now(), type: 'info', text: 'Running automated engine unit tests...\n' });
+        const testResults = EngineTestRunner.runAllTests(files);
+        testResults.forEach(tr => {
+          outputList.push({
+            id: 'tr_' + Math.random(),
+            type: tr.passed ? 'output' : 'error',
+            text: `[${tr.passed ? 'PASS' : 'FAIL'}] ${tr.name} (${tr.durationMs}ms)${tr.error ? ' - ' + tr.error : ''}`
+          });
+        });
+      } else if (args[0] === 'install' || args[0] === 'i') {
+        const pkgName = args[1] || 'package';
+        outputList.push({ id: 'npmi_' + Date.now(), type: 'output', text: `+ ${pkgName}@latest\nAdded 1 package, resolved dependencies in 240ms.` });
+      } else {
+        outputList.push({ id: 'npm_' + Date.now(), type: 'output', text: 'npm v10.8.1. Commands: npm test, npm install <pkg>' });
+      }
+    }
+
+    // Automated Engine Tests (alias: test)
+    else if (cmd === 'test') {
+      outputList.push({ id: 'tstart2_' + Date.now(), type: 'info', text: 'Executing automated script runner & engine unit tests...\n' });
+      const testResults = EngineTestRunner.runAllTests(files);
+      testResults.forEach(tr => {
+        outputList.push({
+          id: 'tr2_' + Math.random(),
+          type: tr.passed ? 'output' : 'error',
+          text: `[${tr.passed ? 'PASS' : 'FAIL'}] ${tr.name} (${tr.durationMs}ms)${tr.error ? ' - ' + tr.error : ''}`
+        });
+      });
+    }
+
+    // Process Table (ps / jobs)
+    else if (cmd === 'ps' || cmd === 'jobs') {
+      outputList.push({
+        id: 'ps_' + Date.now(),
+        type: 'output',
+        text: `PID   TTY      TIME     CMD
+1042  pts/0    00:00:01 node (V8 Main Thread)
+1043  pts/0    00:00:00 python3 (Pyodide Worker)
+1044  pts/0    00:00:00 three-renderer (WebGL Context)
+1045  pts/0    00:00:00 forgeshell (Interactive Bash)`
+      });
+    }
+
+    // Environment Variables & Secrets (env / export)
+    else if (cmd === 'env' || cmd === 'export') {
+      if (args[0] && args[0].includes('=')) {
+        const [k, v] = args[0].split('=');
+        outputList.push({ id: 'exp_' + Date.now(), type: 'output', text: `Exported environment variable ${k}=${v}` });
+      } else {
+        outputList.push({
+          id: 'env_' + Date.now(),
+          type: 'output',
+          text: `NODE_ENV=development
+PORT=3000
+PATH=/usr/local/bin:/usr/bin:/bin
+VITE_APPLET_ID=df8613dc-9ee9-44a5-904b-7b7f881693ba
+DATABASE_URL=sqlite://aetherforge_local.db
+API_SECRET_KEY=********************`
+        });
       }
     }
 

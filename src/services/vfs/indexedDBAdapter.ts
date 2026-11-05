@@ -1,0 +1,144 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+const DB_NAME = 'AetherForge_DB';
+const DB_VERSION = 1;
+const STORE_PROJECTS = 'projects';
+const STORE_SNAPSHOTS = 'snapshots';
+const STORE_VFS = 'vfs_files';
+
+export class IndexedDBAdapter {
+  private db: IDBDatabase | null = null;
+  private isReady: boolean = false;
+
+  constructor() {
+    this.initDB();
+  }
+
+  private initDB(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (typeof window === 'undefined' || !window.indexedDB) {
+        console.warn('IndexedDB not supported in environment, using localStorage fallback.');
+        resolve();
+        return;
+      }
+
+      const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+
+      request.onupgradeneeded = (e: IDBVersionChangeEvent) => {
+        const db = (e.target as IDBOpenDBRequest).result;
+        if (!db.objectStoreNames.contains(STORE_PROJECTS)) {
+          db.createObjectStore(STORE_PROJECTS, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_SNAPSHOTS)) {
+          db.createObjectStore(STORE_SNAPSHOTS, { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains(STORE_VFS)) {
+          db.createObjectStore(STORE_VFS, { keyPath: 'path' });
+        }
+      };
+
+      request.onsuccess = (e: Event) => {
+        this.db = (e.target as IDBOpenDBRequest).result;
+        this.isReady = true;
+        resolve();
+      };
+
+      request.onerror = (e) => {
+        console.warn('IndexedDB open error, using localStorage fallback', e);
+        resolve();
+      };
+    });
+  }
+
+  public async setItem<T>(storeName: string, key: string, value: T): Promise<boolean> {
+    if (!this.db) {
+      try {
+        localStorage.setItem(storeName + '_' + key, JSON.stringify(value));
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    return new Promise(resolve => {
+      try {
+        const tx = this.db!.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+        store.put({ id: key, path: key, data: value, updatedAt: Date.now() });
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  }
+
+  public async getItem<T>(storeName: string, key: string): Promise<T | null> {
+    if (!this.db) {
+      try {
+        const raw = localStorage.getItem(storeName + '_' + key);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    return new Promise(resolve => {
+      try {
+        const tx = this.db!.transaction(storeName, 'readonly');
+        const store = tx.objectStore(storeName);
+        const request = store.get(key);
+        request.onsuccess = () => {
+          const res = request.result;
+          resolve(res ? (res.data ?? res) : null);
+        };
+        request.onerror = () => resolve(null);
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  }
+
+  public async getAll<T>(storeName: string): Promise<T[]> {
+    if (!this.db) return [];
+
+    return new Promise(resolve => {
+      try {
+        const tx = this.db!.transaction(storeName, 'readonly');
+        const store = tx.objectStore(storeName);
+        const request = store.getAll();
+        request.onsuccess = () => {
+          const list = request.result || [];
+          resolve(list.map(item => item.data ?? item));
+        };
+        request.onerror = () => resolve([]);
+      } catch (e) {
+        resolve([]);
+      }
+    });
+  }
+
+  public async deleteItem(storeName: string, key: string): Promise<boolean> {
+    if (!this.db) {
+      localStorage.removeItem(storeName + '_' + key);
+      return true;
+    }
+
+    return new Promise(resolve => {
+      try {
+        const tx = this.db!.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+        store.delete(key);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => resolve(false);
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  }
+}
+
+export const idbAdapter = new IndexedDBAdapter();
