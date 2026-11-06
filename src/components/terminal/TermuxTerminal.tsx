@@ -134,7 +134,7 @@ export const TermuxTerminal: React.FC = () => {
   };
 
   // Command Execution Engine
-  const executeCommand = (cmdStr: string) => {
+  const executeCommand = async (cmdStr: string) => {
     const trimmed = cmdStr.trim();
     if (!trimmed) return;
 
@@ -164,8 +164,8 @@ export const TermuxTerminal: React.FC = () => {
         setInput('');
         return;
       }
-      const res = ScriptRunner.executePython(trimmed);
       const linesToAdd: TerminalLine[] = [{ id: 'p_' + Date.now(), type: 'prompt', text: `>>> ${trimmed}` }];
+      const res = await ScriptRunner.executePythonAsync(trimmed);
       res.logs.forEach(l => linesToAdd.push({ id: CryptoUtils.generateId('plog'), type: 'output', text: l }));
       res.errors.forEach(e => linesToAdd.push({ id: CryptoUtils.generateId('perr'), type: 'error', text: e }));
       appendLines(linesToAdd);
@@ -186,8 +186,8 @@ export const TermuxTerminal: React.FC = () => {
         setInput('');
         return;
       }
-      const res = ScriptRunner.executeJavaScript(trimmed, nodeScope.current);
       const linesToAdd: TerminalLine[] = [{ id: 'n_' + Date.now(), type: 'prompt', text: `> ${trimmed}` }];
+      const res = await ScriptRunner.executeJavaScriptAsync(trimmed, nodeScope.current);
       res.logs.forEach(l => linesToAdd.push({ id: CryptoUtils.generateId('nlog'), type: 'output', text: l }));
       res.errors.forEach(e => linesToAdd.push({ id: CryptoUtils.generateId('nerr'), type: 'error', text: e }));
       if (res.returnValue !== undefined) {
@@ -368,7 +368,7 @@ export const TermuxTerminal: React.FC = () => {
       } else {
         const target = files.find(f => f.name === args[0] || f.path === args[0]);
         if (target) {
-          const res = ScriptRunner.executePython(target.content);
+          const res = await ScriptRunner.executePythonAsync(target.content);
           res.logs.forEach(l => outputList.push({ id: 'pl_' + Math.random(), type: 'output', text: l }));
           res.errors.forEach(e => outputList.push({ id: 'pe_' + Math.random(), type: 'error', text: e }));
         } else {
@@ -393,7 +393,7 @@ export const TermuxTerminal: React.FC = () => {
       } else {
         const target = files.find(f => f.name === args[0] || f.path === args[0]);
         if (target) {
-          const res = ScriptRunner.executeJavaScript(target.content);
+          const res = await ScriptRunner.executeJavaScriptAsync(target.content);
           res.logs.forEach(l => outputList.push({ id: 'nl_' + Math.random(), type: 'output', text: l }));
           res.errors.forEach(e => outputList.push({ id: 'ne_' + Math.random(), type: 'error', text: e }));
         } else {
@@ -407,8 +407,8 @@ export const TermuxTerminal: React.FC = () => {
       if (args[0] === '-v' || args[0] === '--version') {
         outputList.push({ id: 'npmv_' + Date.now(), type: 'output', text: '10.8.1' });
       } else if (args[0] === 'test') {
-        outputList.push({ id: 'tstart_' + Date.now(), type: 'info', text: 'Running automated engine unit tests...\n' });
-        const testResults = EngineTestRunner.runAllTests(files);
+        outputList.push({ id: 'tstart_' + Date.now(), type: 'info', text: 'Running automated asynchronous engine unit tests...\n' });
+        const testResults = await EngineTestRunner.runAllTestsAsync(files);
         testResults.forEach(tr => {
           outputList.push({
             id: 'tr_' + Math.random(),
@@ -426,8 +426,8 @@ export const TermuxTerminal: React.FC = () => {
 
     // Automated Engine Tests (alias: test)
     else if (cmd === 'test') {
-      outputList.push({ id: 'tstart2_' + Date.now(), type: 'info', text: 'Executing automated script runner & engine unit tests...\n' });
-      const testResults = EngineTestRunner.runAllTests(files);
+      outputList.push({ id: 'tstart2_' + Date.now(), type: 'info', text: 'Executing automated script runner & engine unit tests (Async)...\n' });
+      const testResults = await EngineTestRunner.runAllTestsAsync(files);
       testResults.forEach(tr => {
         outputList.push({
           id: 'tr2_' + Math.random(),
@@ -473,9 +473,9 @@ API_SECRET_KEY=********************`
     else if (cmd === 'lua') {
       const target = files.find(f => f.name === args[0] || f.path === args[0]);
       if (target) {
-        const res = ScriptRunner.executeLua(target.content);
-      res.logs.forEach(l => outputList.push({ id: CryptoUtils.generateId('log'), type: 'output', text: l }));
-      res.errors.forEach(e => outputList.push({ id: CryptoUtils.generateId('err'), type: 'error', text: e }));
+        const res = await ScriptRunner.executeLuaAsync(target.content);
+        res.logs.forEach(l => outputList.push({ id: CryptoUtils.generateId('log'), type: 'output', text: l }));
+        res.errors.forEach(e => outputList.push({ id: CryptoUtils.generateId('err'), type: 'error', text: e }));
       } else {
         outputList.push({ id: 'le_' + Date.now(), type: 'error', text: `lua: cannot open '${args[0]}'` });
       }

@@ -218,6 +218,22 @@ export const TopNavBar: React.FC = () => {
       color: '#a855f7',
       tools: [
         {
+          id: 'ai_character',
+          name: 'استودیوی کاراکتر هوش مصنوعی',
+          nameEn: 'AI Character Studio',
+          description: 'تولید فوتورئال و ویدیو با حفظ هویت چهره (PuLID, FLUX, ComfyUI)',
+          icon: Sparkles,
+          tag: 'AI Studio'
+        },
+        {
+          id: 'ai_character',
+          name: 'استودیوی کاراکتر هوش مصنوعی',
+          nameEn: 'AI Character Studio',
+          description: 'تولید تصویر و ویدئوی فوتورئال با حفظ هویت چهره ثابت (PuLID, FLUX, ComfyUI)',
+          icon: Sparkles,
+          tag: 'AI Studio'
+        },
+        {
           id: '3d_studio',
           name: 'استودیو سه‌بعدی (بلندر)',
           nameEn: '3D Blender Studio',

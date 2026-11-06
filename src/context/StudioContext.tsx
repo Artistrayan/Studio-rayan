@@ -39,7 +39,7 @@ const StudioContext = createContext<StudioContextType | null>(null);
 export const StudioProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [workspace, setWorkspace] = useState<WorkspaceMode>('game');
   const [files, setFiles] = useState<VFSFile[]>(() => vfsInstance.getFiles());
-  const [activeFile, setActiveFile] = useState<VFSFile>(() => files[0] || vfsInstance.getFiles()[0]);
+  const [activeFile, setActiveFile] = useState<VFSFile>(() => vfsInstance.getFiles()[0]);
   const [language, setLanguage] = useState<Language>('fa'); // Default to Persian as requested by user
   const [theme, setTheme] = useState<Theme>('dark');
   const [isPlaying, setIsPlaying] = useState<boolean>(true);

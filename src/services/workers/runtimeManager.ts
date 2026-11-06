@@ -59,3 +59,5 @@ export class RuntimeManager {
     this.workers.delete(language);
   }
 }
+
+export const runtimeManager = new RuntimeManager();

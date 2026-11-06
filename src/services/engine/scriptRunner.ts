@@ -4,6 +4,7 @@
  */
 
 import { permissionManager } from '../security/permissionManager';
+import { runtimeManager } from '../workers/runtimeManager';
 
 export interface ExecutionResult {
   success: boolean;
@@ -838,9 +839,63 @@ export class ScriptRunner {
     return interpreter.run(code, extraContext, projectId);
   }
 
+  public static async executeJavaScriptAsync(
+    code: string,
+    extraContext: Record<string, any> = {}
+  ): Promise<ExecutionResult> {
+    const startTime = performance.now();
+    const logs: string[] = [];
+    const errors: string[] = [];
+    try {
+      const customConsole = {
+        log: (...args: any[]) => logs.push(args.map(a => String(a)).join(' ')),
+        warn: (...args: any[]) => logs.push('[WARN] ' + args.map(a => String(a)).join(' ')),
+        error: (...args: any[]) => errors.push('[ERROR] ' + args.map(a => String(a)).join(' ')),
+        info: (...args: any[]) => logs.push('[INFO] ' + args.map(a => String(a)).join(' '))
+      };
+      const fn = new Function('console', ...Object.keys(extraContext), `try { ${code} } catch(e) { console.error(e.message); }`);
+      const res = fn(customConsole, ...Object.values(extraContext));
+      return {
+        success: errors.length === 0,
+        logs,
+        errors,
+        returnValue: res,
+        executionTimeMs: Number((performance.now() - startTime).toFixed(2))
+      };
+    } catch (err: any) {
+      errors.push(err.message || String(err));
+      return {
+        success: false,
+        logs,
+        errors,
+        executionTimeMs: Number((performance.now() - startTime).toFixed(2))
+      };
+    }
+  }
+
   public static executePython(code: string): ExecutionResult {
     const runtime = new PythonRuntime();
     return runtime.run(code);
+  }
+
+  public static async executePythonAsync(code: string): Promise<ExecutionResult> {
+    const startTime = performance.now();
+    try {
+      const res: any = await runtimeManager.execute('python', code);
+      return {
+        success: res.success,
+        logs: res.logs || [],
+        errors: res.errors || [],
+        executionTimeMs: Number((performance.now() - startTime).toFixed(2))
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        logs: [],
+        errors: [err.message || String(err)],
+        executionTimeMs: Number((performance.now() - startTime).toFixed(2))
+      };
+    }
   }
 
   public static executeLua(code: string): ExecutionResult {
@@ -848,7 +903,28 @@ export class ScriptRunner {
     return runtime.run(code);
   }
 
+  public static async executeLuaAsync(code: string): Promise<ExecutionResult> {
+    const startTime = performance.now();
+    try {
+      const res: any = await runtimeManager.execute('lua', code);
+      return {
+        success: res.success,
+        logs: res.logs || [],
+        errors: res.errors || [],
+        executionTimeMs: Number((performance.now() - startTime).toFixed(2))
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        logs: [],
+        errors: [err.message || String(err)],
+        executionTimeMs: Number((performance.now() - startTime).toFixed(2))
+      };
+    }
+  }
+
   public static validateGLSL(fragmentShaderSource: string): { success: boolean; error?: string } {
     return GLSLValidator.validate(fragmentShaderSource);
   }
 }
+

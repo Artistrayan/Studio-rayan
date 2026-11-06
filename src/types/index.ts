@@ -22,7 +22,9 @@ export type WorkspaceMode =
   | 'terminal'
   | 'git'
   | 'export'
-  | 'assets';
+  | 'assets'
+  | 'ai_character';
+
 
 export type Language = 'en' | 'fa';
 export type Theme = 'dark' | 'light';

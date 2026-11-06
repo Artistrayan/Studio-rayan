@@ -21,6 +21,7 @@ import { TilemapEditor } from './components/level/TilemapEditor';
 import { AudioSynthStudio } from './components/audio/AudioSynthStudio';
 import { ParticleSystemDesigner } from './components/particles/ParticleSystemDesigner';
 import { AIBehaviorTreeStudio } from './components/ai/AIBehaviorTreeStudio';
+import { AICharacterStudio } from './components/ai/AICharacterStudio';
 import { PixelSpriteAnimator } from './components/sprites/PixelSpriteAnimator';
 import { VisualUIBuilder } from './components/uibuilder/VisualUIBuilder';
 import { LocalDatabaseStudio } from './components/database/LocalDatabaseStudio';
@@ -47,6 +48,7 @@ const StudioMain: React.FC = () => {
         {workspace === 'audio_synth' && <AudioSynthStudio />}
         {workspace === 'particles' && <ParticleSystemDesigner />}
         {workspace === 'ai_behavior' && <AIBehaviorTreeStudio />}
+        {workspace === 'ai_character' && <AICharacterStudio />}
         {workspace === 'sprites' && <PixelSpriteAnimator />}
         {workspace === 'uibuilder' && <VisualUIBuilder />}
         {workspace === 'database' && <LocalDatabaseStudio />}

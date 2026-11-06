@@ -120,17 +120,12 @@ export const PWAInstallButton: React.FC = () => {
   }
 
   return (
-    <button
-      onClick={() => {
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.register('/sw.js').catch(() => {});
-        }
-      }}
-      className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#232630] hover:bg-[#2c303e] border border-[#34394a] text-xs text-cyan-400 font-medium cursor-pointer"
-      title="وب‌اپلیکیشن مستقل (PWA Offline Ready)"
+    <div
+      className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#232630] border border-[#34394a] text-xs text-cyan-400 font-medium select-none"
+      title="وب‌اپلیکیشن مستقل (PWA Ready)"
     >
       <Download className="w-3.5 h-3.5" />
       <span>PWA آماده</span>
-    </button>
+    </div>
   );
 };
