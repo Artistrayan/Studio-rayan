@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-const DB_NAME = 'AetherForge_DB';
-const DB_VERSION = 1;
+const DB_NAME = 'AetherForge_Master_DB';
+const DB_VERSION = 2;
 const STORE_PROJECTS = 'projects';
 const STORE_SNAPSHOTS = 'snapshots';
 const STORE_VFS = 'vfs_files';
+const STORE_ASSETS = 'binary_assets'; // GLB, glTF, OBJ, FBX, audio, textures
 
 export class IndexedDBAdapter {
   private db: IDBDatabase | null = null;
@@ -18,9 +19,9 @@ export class IndexedDBAdapter {
   }
 
   private initDB(): Promise<void> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       if (typeof window === 'undefined' || !window.indexedDB) {
-        console.warn('IndexedDB not supported in environment, using localStorage fallback.');
+        console.warn('IndexedDB not supported in environment.');
         resolve();
         return;
       }
@@ -38,6 +39,9 @@ export class IndexedDBAdapter {
         if (!db.objectStoreNames.contains(STORE_VFS)) {
           db.createObjectStore(STORE_VFS, { keyPath: 'path' });
         }
+        if (!db.objectStoreNames.contains(STORE_ASSETS)) {
+          db.createObjectStore(STORE_ASSETS, { keyPath: 'id' });
+        }
       };
 
       request.onsuccess = (e: Event) => {
@@ -47,21 +51,14 @@ export class IndexedDBAdapter {
       };
 
       request.onerror = (e) => {
-        console.warn('IndexedDB open error, using localStorage fallback', e);
+        console.warn('IndexedDB open error', e);
         resolve();
       };
     });
   }
 
   public async setItem<T>(storeName: string, key: string, value: T): Promise<boolean> {
-    if (!this.db) {
-      try {
-        localStorage.setItem(storeName + '_' + key, JSON.stringify(value));
-        return true;
-      } catch (e) {
-        return false;
-      }
-    }
+    if (!this.db) return false;
 
     return new Promise(resolve => {
       try {
@@ -70,21 +67,14 @@ export class IndexedDBAdapter {
         store.put({ id: key, path: key, data: value, updatedAt: Date.now() });
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => resolve(false);
-      } catch (e) {
+      } catch {
         resolve(false);
       }
     });
   }
 
   public async getItem<T>(storeName: string, key: string): Promise<T | null> {
-    if (!this.db) {
-      try {
-        const raw = localStorage.getItem(storeName + '_' + key);
-        return raw ? JSON.parse(raw) : null;
-      } catch (e) {
-        return null;
-      }
-    }
+    if (!this.db) return null;
 
     return new Promise(resolve => {
       try {
@@ -96,7 +86,7 @@ export class IndexedDBAdapter {
           resolve(res ? (res.data ?? res) : null);
         };
         request.onerror = () => resolve(null);
-      } catch (e) {
+      } catch {
         resolve(null);
       }
     });
@@ -115,17 +105,14 @@ export class IndexedDBAdapter {
           resolve(list.map(item => item.data ?? item));
         };
         request.onerror = () => resolve([]);
-      } catch (e) {
+      } catch {
         resolve([]);
       }
     });
   }
 
   public async deleteItem(storeName: string, key: string): Promise<boolean> {
-    if (!this.db) {
-      localStorage.removeItem(storeName + '_' + key);
-      return true;
-    }
+    if (!this.db) return false;
 
     return new Promise(resolve => {
       try {
@@ -134,7 +121,7 @@ export class IndexedDBAdapter {
         store.delete(key);
         tx.oncomplete = () => resolve(true);
         tx.onerror = () => resolve(false);
-      } catch (e) {
+      } catch {
         resolve(false);
       }
     });
