@@ -8,14 +8,15 @@ const DB_VERSION = 2;
 const STORE_PROJECTS = 'projects';
 const STORE_SNAPSHOTS = 'snapshots';
 const STORE_VFS = 'vfs_files';
-const STORE_ASSETS = 'binary_assets'; // GLB, glTF, OBJ, FBX, audio, textures
+const STORE_ASSETS = 'binary_assets';
 
 export class IndexedDBAdapter {
   private db: IDBDatabase | null = null;
   private isReady: boolean = false;
+  private initPromise: Promise<void>;
 
   constructor() {
-    this.initDB();
+    this.initPromise = this.initDB();
   }
 
   private initDB(): Promise<void> {
@@ -57,7 +58,14 @@ export class IndexedDBAdapter {
     });
   }
 
+  public async ensureReady(): Promise<void> {
+    if (!this.isReady) {
+      await this.initPromise;
+    }
+  }
+
   public async setItem<T>(storeName: string, key: string, value: T): Promise<boolean> {
+    await this.ensureReady();
     if (!this.db) return false;
 
     return new Promise(resolve => {
@@ -74,6 +82,7 @@ export class IndexedDBAdapter {
   }
 
   public async getItem<T>(storeName: string, key: string): Promise<T | null> {
+    await this.ensureReady();
     if (!this.db) return null;
 
     return new Promise(resolve => {
@@ -93,6 +102,7 @@ export class IndexedDBAdapter {
   }
 
   public async getAll<T>(storeName: string): Promise<T[]> {
+    await this.ensureReady();
     if (!this.db) return [];
 
     return new Promise(resolve => {
@@ -112,6 +122,7 @@ export class IndexedDBAdapter {
   }
 
   public async deleteItem(storeName: string, key: string): Promise<boolean> {
+    await this.ensureReady();
     if (!this.db) return false;
 
     return new Promise(resolve => {
