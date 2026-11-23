@@ -1,0 +1,71 @@
+name: Web Preview
+
+on:
+  push:
+    branches:
+      - main
+      - web-preview-setup
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build web application
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript diagnostics
+        run: bun run lint
+        continue-on-error: true
+
+      - name: Build for GitHub Pages
+        run: bun run build
+        env:
+          GITHUB_PAGES: 'true'
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    name: Publish web preview
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Deploy preview
+        id: deployment
+        uses: actions/deploy-pages@v4
